@@ -4,48 +4,50 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage
 from dotenv import load_dotenv
 
-# FORCE LOAD: Load .env file explicitly to avoid "KeyError"
 load_dotenv()
 
-# DEBUG: Print to terminal to prove the key exists
+# --- CONFIG ---
 api_key = os.getenv("GOOGLE_API_KEY")
-if not api_key:
-    print("❌ CRITICAL ERROR: GOOGLE_API_KEY is missing from environment!")
-else:
-    print(f"✅ Manager Agent found API Key: {api_key[:5]}...")
-
-# 1. Initialize Gemini with the safe key
 llm = ChatGoogleGenerativeAI(
-    model="gemini-2.5-flash",
-    google_api_key=api_key, 
-    temperature=0.7
+    model="gemini-2.5-flash", # Use the model that works for you
+    google_api_key=api_key,
+    temperature=0.8 # Higher temperature = More creativity/variety
 )
 
 def manager_node(state):
     print("--- MANAGER AGENT STARTED ---")
     
-    # 2. Get User Input
-    # Safely get the first message. If state is empty, use a default.
+    # Safely get user input
     messages = state.get("messages", [])
-    if messages:
-        user_input = messages[0]
-    else:
-        user_input = "I want a random coding task."
+    user_input = messages[0] if messages else "I want a coding challenge."
     
-    # 3. The Logic (Prompt)
-    system_prompt = """You are a Senior Product Owner. 
-    Your goal: Create a realistic 1-day Hackathon Sprint for a user.
-    
-    Rules:
-    1. Create exactly 3 technical tasks.
-    2. OUTPUT MUST BE VALID JSON ONLY.
-    
-    JSON Format:
+    print(f"🧠 Analyzing Request: '{user_input}'")
+
+    # --- THE SMARTER PROMPT ---
+    system_prompt = """You are a Senior Technical Product Owner.
+    Your goal is to create a realistic, unique 1-day Sprint Plan based *strictly* on the user's request.
+
+    ### INSTRUCTIONS:
+    1. **Analyze the Role:** - If user says "Junior", give simple tasks (e.g., "Create function", "Fix bug").
+       - If user says "Senior", give complex tasks (e.g., "Optimize algorithm", "Design Pattern", "Concurrency").
+       - If user mentions specific tech (e.g., "Machine Learning"), the tasks MUST be about that tech (e.g., "Split Data", "Train Model"), NOT web dev.
+
+    2. **Create 3 Distinct Tickets:**
+       - Ticket 1: Setup / Foundation (Specific to the domain).
+       - Ticket 2: Core Logic / Algorithm (The hard part).
+       - Ticket 3: Testing / Validation (Verification).
+
+    3. **Project Name:** Invent a cool, relevant name (e.g., 'neural-net-v1', 'crypto-bot-alpha').
+
+    4. **Output Format:** JSON ONLY. No markdown. No chatter.
+
+    ### EXAMPLE (DO NOT COPY, JUST REFERENCE FORMAT):
     {
-      "project_name": "library_system",
+      "project_name": "context_aware_name",
       "tickets": [
-        {"id": "1", "title": "Setup FastAPI", "body": "Initialize app."},
-        {"id": "2", "title": "DB Config", "body": "Setup SQLite."}
+        {"id": "1", "title": "Unique Task Name", "body": "Specific details..."},
+        {"id": "2", "title": "Unique Task Name", "body": "Specific details..."},
+        {"id": "3", "title": "Unique Task Name", "body": "Specific details..."}
       ]
     }
     """
@@ -53,16 +55,17 @@ def manager_node(state):
     try:
         response = llm.invoke([
             SystemMessage(content=system_prompt),
-            HumanMessage(content=str(user_input))
+            HumanMessage(content=f"User Request: {str(user_input)}")
         ])
-        print(f"Manager Generated: {response.content}")
+
+        print(f"Manager Output: {response.content[:100]}...")
         return {"messages": [response.content]}
-        
+
     except Exception as e:
-        print(f"❌ Manager AI Failed: {e}")
-        # Return a fallback JSON so the next agent doesn't crash
-        fallback_json = json.dumps({
-            "project_name": "backup_project",
-            "tickets": [{"id": "0", "title": "Error", "body": "AI failed to generate."}]
+        print(f"❌ Manager Error: {e}")
+        # Fallback JSON to prevent crash
+        fallback = json.dumps({
+            "project_name": "emergency_fix",
+            "tickets": [{"id": "1", "title": "Error", "body": "AI Generation Failed."}]
         })
-        return {"messages": [fallback_json]}
+        return {"messages": [fallback]}
