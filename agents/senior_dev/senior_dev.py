@@ -15,7 +15,6 @@ HEADERS = {
     "Accept": "application/vnd.github.v3+json"
 }
 
-# Use the model that works for you (2.5-flash)
 llm = ChatGoogleGenerativeAI(
     model="gemini-2.5-flash",
     google_api_key=api_key,
@@ -24,7 +23,6 @@ llm = ChatGoogleGenerativeAI(
 
 # --- HELPER 1: FETCH CODE ---
 def get_code_from_github(repo_url):
-    """Fetches the main.py from the repo."""
     try:
         clean_url = repo_url.rstrip("/")
         parts = clean_url.split("/")
@@ -38,9 +36,10 @@ def get_code_from_github(repo_url):
         files = response.json()
         target_file = None
         
+        # Priority Search
         if isinstance(files, list):
             for f in files:
-                if f["name"].endswith(".py"):
+                if f["name"].endswith(".py") or f["name"].endswith(".js") or f["name"].endswith(".html"):
                     target_file = f
                     break
         
@@ -50,15 +49,13 @@ def get_code_from_github(repo_url):
     except Exception as e:
         return f"ERROR: {str(e)}", None, None
 
-# --- HELPER 2: FETCH REQUIREMENTS (ISSUES) ---
+# --- HELPER 2: FETCH TICKETS ---
 def get_open_issues(owner, repo):
-    """Fetches the 'Jira Tickets' (Open Issues) for the repo."""
     try:
         url = f"https://api.github.com/repos/{owner}/{repo}/issues?state=open"
         response = requests.get(url, headers=HEADERS)
         if response.status_code == 200:
             issues = response.json()
-            # Extract just the titles and bodies
             summary = [f"- Ticket #{i['number']}: {i['title']}" for i in issues]
             return "\n".join(summary) if summary else "No open tickets found."
         return "Could not fetch issues."
@@ -70,7 +67,7 @@ def post_github_review(owner, repo, review_content):
     url = f"https://api.github.com/repos/{owner}/{repo}/issues"
     
     title = "⚠️ Code Review: Needs Improvement"
-    if "approved" in review_content.lower() and "great" in review_content.lower():
+    if "APPROVED" in review_content.upper():
         title = "✅ Code Review: Approved"
         
     payload = {
@@ -87,7 +84,7 @@ def senior_dev_node(state):
     
     if not repo_url: return {"messages": ["❌ Error: No Repo URL provided."]}
 
-    # 1. Fetch Code
+    # 1. Fetch Code & Requirements
     code_result, owner, repo = get_code_from_github(repo_url)
     
     if code_result == "NO_CODE":
@@ -95,27 +92,23 @@ def senior_dev_node(state):
     elif "ERROR" in code_result:
         return {"messages": [f"⚠️ Connection Error: {code_result}"]}
 
-    # 2. Fetch Requirements (The "Sprint Plan")
-    print(f"🧐 Fetching requirements for {owner}/{repo}...")
     sprint_tasks = get_open_issues(owner, repo)
 
-    print(f"🧐 Reviewing Code vs Tickets...")
-
-    # 3. AI Analysis (Expectation vs Reality)
+    # 2. AI Analysis
     system_prompt = f"""You are a Senior Software Engineer. 
-    You manage a Junior Dev who was assigned specific tickets.
     
-    === THE SPRINT TASKS (EXPECTATION) ===
+    === THE ASSIGNMENT ===
     {sprint_tasks}
     
-    === THE CODE SUBMITTED (REALITY) ===
+    === THE CODE SUBMITTED ===
     {code_result}
     
-    YOUR GOAL:
-    Compare the Code against the Sprint Tasks.
-    1. If they wrote "Hello World" but the ticket said "Build Database", SCORCH THEM.
-    2. Explicitly mention which tickets they failed to implement.
-    3. Be strict but professional.
+    ### INSTRUCTIONS:
+    1. Compare Code vs Assignment.
+    2. If the code meets the requirements, start your response with "**STATUS: APPROVED**".
+    3. If APPROVED, generate a "Resume Boost" section at the bottom.
+       - "Resume Bullet Point: Built a [Project Name] using [Tech Stack] that [Key Feature]."
+    4. If REJECTED, roast them professionally.
     """
     
     try:
@@ -126,7 +119,7 @@ def senior_dev_node(state):
         
         review_text = response.content
 
-        # 4. Post to GitHub
+        # 3. Post to GitHub
         post_github_review(owner, repo, review_text)
         
         return {"messages": [review_text]}

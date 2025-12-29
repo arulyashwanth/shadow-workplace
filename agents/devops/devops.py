@@ -16,53 +16,58 @@ HEADERS = {
     "Accept": "application/vnd.github.v3+json"
 }
 
-# --- HELPER: CREATE REPO ---
+# --- HELPER 1: CREATE REPO ---
 def create_repo(repo_name):
-    """Creates a public repository."""
+    """Creates a public repository with a unique name."""
+    # Add random suffix to avoid name collisions
     rand_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
     unique_name = f"{repo_name}-{rand_suffix}"
     
     payload = {
         "name": unique_name,
-        "description": "Shadow Workplace Simulation - Do not delete.",
+        "description": "Shadow Workplace Simulation - Professional Sandbox",
         "private": False,
-        "auto_init": True # Creates an empty README automatically
+        "auto_init": True  # Creates an empty README/main branch immediately
     }
     
-    response = requests.post(f"{GITHUB_API_URL}/user/repos", json=payload, headers=HEADERS)
-    
-    if response.status_code == 201:
-        return response.json()
-    else:
-        print(f"❌ GitHub Creation Failed: {response.status_code} - {response.text}")
+    try:
+        response = requests.post(f"{GITHUB_API_URL}/user/repos", json=payload, headers=HEADERS)
+        if response.status_code == 201:
+            return response.json()
+        else:
+            print(f"❌ GitHub Creation Failed: {response.status_code} - {response.text}")
+            return None
+    except Exception as e:
+        print(f"❌ Connection Error: {e}")
         return None
 
-# --- HELPER: UPDATE FILE (The Readme Writer) ---
-def update_file(owner, repo, path, content, message):
-    """Updates or creates a file in the repo."""
-    url = f"{GITHUB_API_URL}/repos/{owner}/{repo}/contents/{path}"
+# --- HELPER 2: CREATE/UPDATE FILE ---
+def create_file(owner, repo, filepath, content):
+    """
+    Creates a file in the repo. 
+    GitHub API automatically creates folders if 'filepath' contains slashes (e.g. 'data/train.csv').
+    """
+    url = f"{GITHUB_API_URL}/repos/{owner}/{repo}/contents/{filepath}"
     
-    # 1. Get current SHA (Required to overwrite files)
-    sha = None
-    get_resp = requests.get(url, headers=HEADERS)
-    if get_resp.status_code == 200:
-        sha = get_resp.json().get("sha")
-
-    # 2. Encode Content to Base64
+    # GitHub API requires content to be Base64 encoded
     b64_content = base64.b64encode(content.encode("utf-8")).decode("utf-8")
     
-    # 3. Prepare Payload
     payload = {
-        "message": message,
+        "message": f"DevOps: Setup {filepath}",
         "content": b64_content
     }
-    if sha:
-        payload["sha"] = sha # Attach SHA if we are overwriting
     
-    # 4. Push Update
-    requests.put(url, json=payload, headers=HEADERS)
+    try:
+        # Check if file exists (to get SHA for overwrite) - distinct from creation but good practice
+        get_resp = requests.get(url, headers=HEADERS)
+        if get_resp.status_code == 200:
+            payload["sha"] = get_resp.json().get("sha")
 
-# --- HELPER: CREATE ISSUE ---
+        requests.put(url, json=payload, headers=HEADERS)
+    except Exception as e:
+        print(f"⚠️ Failed to create file {filepath}: {e}")
+
+# --- HELPER 3: CREATE ISSUE (Jira Ticket) ---
 def create_issue(owner, repo, title, body):
     url = f"{GITHUB_API_URL}/repos/{owner}/{repo}/issues"
     payload = {"title": title, "body": body}
@@ -72,15 +77,19 @@ def create_issue(owner, repo, title, body):
 def devops_node(state):
     print("--- DEVOPS AGENT STARTED ---")
     
+    # 1. Parse Manager Output
     manager_output = state["messages"][-1]
-    clean_json = manager_output.replace("```json", "").replace("```", "").strip()
     
     try:
+        # Clean JSON markdown if present
+        clean_json = manager_output.replace("```json", "").replace("```", "").strip()
         plan = json.loads(clean_json)
+        
         base_name = plan.get("project_name", "shadow-project")
         tickets = plan.get("tickets", [])
+        starter_files = plan.get("starter_files", []) # <--- Retrieves the file list
         
-        # 1. Build the Infrastructure
+        # 2. Build Infrastructure
         repo_data = create_repo(base_name)
         
         if repo_data:
@@ -88,19 +97,38 @@ def devops_node(state):
             owner = repo_data['owner']['login']
             repo_url = repo_data['html_url']
             
-            # 2. Generate the Mission Briefing (README content)
-            readme_content = f"""# 🕵️ Project: {base_name.replace('_', ' ').title()}
+            print(f"🏗️ Repo Created: {repo_url}")
+            
+            # 3. Create Starter Files (Datasets, Configs, Templates)
+            print(f"📂 Injecting {len(starter_files)} starter files...")
+            for file in starter_files:
+                create_file(owner, full_repo_name, file['name'], file['content'])
+                print(f"   - Created: {file['name']}")
+
+            # 4. Generate Mission Briefing (README.md)
+            readme_content = f"""# 🕵️ Project: {base_name.replace('-', ' ').title()}
 
 > **Status:** Active Simulation  
-> **Role:** Junior Developer
+> **Role:** Engineering Intern / Junior Dev
 
-## 📋 Your Mission
-You have been hired to build this module. Your manager has assigned the following tickets.
-Please implement the code in `main.py` (or appropriate files) to satisfy these requirements.
+## 📋 Mission Briefing
+You have been onboarded to this project. Your Manager has set up the initial infrastructure and datasets.
+**Your Goal:** Complete the Active Tickets assigned to you.
 
-## 🎟️ Active Tickets
+## 📂 Project Structure
+The DevOps team has pre-loaded these files for you:
 """
-            # Add tickets to README text
+            if starter_files:
+                for f in starter_files:
+                    readme_content += f"- `{f['name']}`\n"
+            else:
+                readme_content += "- *No starter files provided (Greenfield Project)*\n"
+
+            readme_content += """
+## 🎟️ Active Tickets
+Please implement the code to satisfy these requirements:
+
+"""
             for t in tickets:
                 readme_content += f"### Ticket #{t['id']}: {t['title']}\n{t['body']}\n\n"
 
@@ -114,20 +142,18 @@ Please implement the code in `main.py` (or appropriate files) to satisfy these r
 ---
 *Generated by Shadow Workplace AI*
 """
+            # Overwrite the default README
+            create_file(owner, full_repo_name, "README.md", readme_content)
 
-            # 3. Push the README to the Repo
-            print(f"📝 Writing Mission Briefing to README.md...")
-            update_file(owner, full_repo_name, "README.md", readme_content, "Docs: Update Mission Briefing")
-
-            # 4. Create the Actual Jira Issues (Metadata)
-            print(f"✅ Repo Created: {repo_url}")
+            # 5. Create Actual GitHub Issues
             for ticket in tickets:
                 create_issue(owner, full_repo_name, ticket['title'], ticket['body'])
-                print(f"   - Created Issue: {ticket['title']}")
+                print(f"   - Created Ticket: {ticket['title']}")
                 
-            return {"messages": [f"✅ SUCCESS: Created {repo_url} with a detailed README mission brief."]}
+            return {"messages": [f"✅ SUCCESS: Workspace ready at {repo_url} with {len(starter_files)} starter files."]}
         else:
-            return {"messages": ["❌ Failed to create GitHub repo."]}
+            return {"messages": ["❌ Error: Failed to create GitHub repository."]}
             
     except Exception as e:
-        return {"messages": [f"❌ DevOps Crash: {str(e)}"]}
+        print(f"🔥 DevOps Crash: {e}")
+        return {"messages": [f"❌ DevOps Agent Failed: {str(e)}"]}
