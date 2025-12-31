@@ -1,5 +1,6 @@
 import os
 import json
+import re
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage
 from dotenv import load_dotenv
@@ -11,69 +12,67 @@ api_key = os.getenv("GOOGLE_API_KEY")
 llm = ChatGoogleGenerativeAI(
     model="gemini-2.5-flash", 
     google_api_key=api_key,
-    temperature=0.8 # High creativity for complex scenarios
+    temperature=0.7
 )
+
+# --- HELPER: ROBUST JSON EXTRACTOR ---
+def extract_json(text):
+    try:
+        text = text.replace("```json", "").replace("```", "").strip()
+        match = re.search(r'\{.*\}', text, re.DOTALL)
+        if match: return match.group(0)
+        return text
+    except: return text
 
 def manager_node(state):
     print("--- MANAGER AGENT STARTED ---")
-    
     messages = state.get("messages", [])
     user_input = messages[0] if messages else "I want a coding challenge."
-    
     print(f"🧠 Analyzing Request: '{user_input}'")
 
-    system_prompt = """You are a CTO / Staff Engineer at a High-Scale Tech Company.
-    Your goal is to assign a specific, complex, real-world engineering problem.
+    system_prompt = """You are a Senior Technical Mentor.
+    Your goal is to generating a coding project tailored EXACTLY to the user's skill level.
 
-    ### 1. ANALYZE DIFFICULTY:
+    ### 1. DETECT SKILL LEVEL (CRITICAL):
     
-    * **If User says "Beginner/Intern":** Keep it simple (CRUD apps).
-    
-    * **If User says "Advanced", "Real World", "Senior", or "Complex":**
-      - **DO NOT** assign generic "Build a Blog" tasks.
-      - **DO ASSIGN** System Design & Scalability challenges.
-      - **Topics:** Microservices, Event-Driven Architecture (Kafka/Redis), High-Frequency Trading, Video Streaming, RAG Pipelines.
-      - **Tickets:** Must involve "Race Conditions", "Database Locking", "Caching Strategies", or "Dockerizing".
+    * **LEVEL 1: BEGINNER / FROM SCRATCH / LEARNING**
+        * **Keywords:** "Learn", "Scratch", "Beginner", "Newbie", "Basics".
+        * **Scope:** 2 Missions. Extremely granular.
+        * **Focus:** Syntax, Variables, Printing, Basic Logic.
+        * **Tone:** Encouraging Guide.
+        * **Example Task:** "Mission 1: Hello World. Create a file and print a string."
 
-    ### 2. SCENARIO GENERATION (The "Real World" Twist):
-    Instead of a blank slate, give them a "Broken" or "Legacy" codebase to fix, OR a high-scale constraint.
-    
-    **Scenario A: High-Traffic E-Commerce (Backend)**
-    * Problem: "The Inventory Service over-sells items during Flash Sales due to race conditions."
-    * Stack: FastAPI, Redis (for locking), PostgreSQL.
-    * Files: `docker-compose.yml`, `load_test.py` (simulating traffic).
-    
-    **Scenario B: Real-Time Chat (Full Stack)**
-    * Problem: "Messages are lost when the WebSocket server restarts."
-    * Stack: Node.js/Python, Redis Pub/Sub, WebSockets.
-    * Files: `server.py` (basic websocket), `pubsub.py`.
+    * **LEVEL 2: JUNIOR / ENTRY-LEVEL / INTERNSHIP**
+        * **Keywords:** "Internship", "Junior", "Portfolio", "Project", "Build".
+        * **Scope:** 3-4 Missions. Functional features.
+        * **Focus:** APIs, Database connections, CSS styling, Bug fixes.
+        * **Tone:** Engineering Manager.
+        * **Example Task:** "Mission 1: API Setup. Connect the frontend to the backend endpoint."
 
-    **Scenario C: AI RAG Pipeline (Data/AI)**
-    * Problem: "The Vector DB ingestion is too slow and blocks the UI."
-    * Stack: Celery (Async Workers), Vector DB (Chroma/FAISS), OpenAI API.
-    * Files: `worker.py`, `api.py`.
+    * **LEVEL 3: SENIOR / ADVANCED / REAL WORLD**
+        * **Keywords:** "Advanced", "Scalable", "System Design", "Microservices", "Senior".
+        * **Scope:** 4-5 Missions. Complex Architecture.
+        * **Focus:** Docker, Caching (Redis), Concurrency, Security, Optimization.
+        * **Tone:** CTO / Staff Engineer.
+        * **Example Task:** "Mission 1: Containerization. Dockerize the legacy service to reduce deployment drift."
 
-    ### 3. OUTPUT FORMAT (JSON ONLY):
+    ### 2. FORMATTING & SAFETY:
+    * **Professional Mission Style:** Use titles like "Mission 1: [Task Name]". Explain the 'Why' (Context).
+    * **NO DOUBLE QUOTES INSIDE STRINGS.** Use single quotes. (e.g. "body": "Use 'print()' function")
+    * **OUTPUT PURE JSON ONLY.**
+
+    ### 3. OUTPUT FORMAT (JSON):
     {
-      "project_name": "high-scale-notification-engine",
+      "project_name": "project-slug",
       "tickets": [
-        {"id": "1", "title": "Implement Redis Caching", "body": "The API latency is 500ms. Implement 'Write-Through' caching to drop it to <50ms."},
-        {"id": "2", "title": "Fix Race Condition", "body": "Two users can claim the same coupon. Use Redis Distributed Locks (Redlock) to prevent this."},
-        {"id": "3", "title": "Dockerize Service", "body": "Create a Multi-Stage Dockerfile and a docker-compose.yml to spin up the App + Redis + Postgres."}
+        {
+          "id": "1", 
+          "title": "🧱 Mission 1: [Task Name]", 
+          "body": "**Objective:** [One sentence goal].\\n\\n**Context:** [Why this matters].\\n\\n**Orders:**\\n- [ ] Step 1\\n- [ ] Step 2"
+        }
       ],
       "starter_files": [
-        {
-          "name": "docker-compose.yml",
-          "content": "version: '3.8'\\nservices:\\n  redis:\\n    image: redis:alpine"
-        },
-        {
-          "name": "main.py",
-          "content": "# SIMULATED SLOW ENDPOINT\\nimport time\\ndef get_data():\\n    time.sleep(0.5) # Fix this with caching!\\n    return {'data': 'value'}"
-        },
-        {
-          "name": "requirements.txt",
-          "content": "fastapi\\nuvicorn\\nredis\\nasyncio"
-        }
+        { "name": "main.py", "content": "print('Ready')" }
       ]
     }
     """
@@ -84,17 +83,20 @@ def manager_node(state):
             HumanMessage(content=f"User Request: {str(user_input)}")
         ])
         
-        content = response.content.replace("```json", "").replace("```", "")
-        # Validate JSON
-        json.loads(content) 
-        
-        return {"messages": [content]}
+        clean_content = extract_json(response.content)
+        parsed_json = json.loads(clean_content)
+        return {"messages": [json.dumps(parsed_json)]}
 
-    except Exception as e:
-        print(f"❌ Manager Error: {e}")
+    except json.JSONDecodeError as e:
+        print(f"❌ JSON Parse Error: {e}")
+        # Robust Fallback
         fallback = json.dumps({
-            "project_name": "fallback_project",
-            "tickets": [{"id": "1", "title": "Error", "body": "AI Generation Failed."}],
+            "project_name": "shadow-fallback",
+            "tickets": [{"id": "1", "title": "Mission 1: System Check", "body": "AI Generation Failed. Please try a simpler prompt."}],
             "starter_files": []
         })
         return {"messages": [fallback]}
+
+    except Exception as e:
+        print(f"❌ Manager Crash: {e}")
+        return {"messages": ["Error"]}
