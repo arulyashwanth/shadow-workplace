@@ -19,3 +19,59 @@ graph TD
     User -->|5. Pushes Code or PR| GitHub
     GitHub -->|6. Webhook| Senior[Senior Engineer Agent]
     Senior -->|7. Strict Review| GitHub
+```
+
+## 🚀 Getting Started
+
+This project is containerized using Docker to ensure a consistent development environment.
+
+### Prerequisites
+
+*   [Docker](https://docs.docker.com/get-docker/)
+*   [Docker Compose](https://docs.docker.com/compose/install/)
+
+### Installation
+
+1.  **Clone the repository:**
+    ```sh
+    git clone https://github.com/your-username/shadow-workplace.git
+    cd shadow-workplace
+    ```
+
+2.  **Build and run the container:**
+    This command will build the Docker image and start the FastAPI application.
+    ```sh
+    docker-compose up --build
+    ```
+
+The application will be running at `http://localhost:8000`.
+
+## Usage
+
+You can interact with the agent workflow through the API.
+
+### Invoke the Agent Workflow
+
+Send a POST request to the `/agent/invoke` endpoint with a prompt.
+
+**Request:**
+```bash
+curl -X POST "http://localhost:8000/agent/invoke" \
+     -H "Content-Type: application/json" \
+     -d '{"prompt": "Hello, agent!"}'
+```
+
+**Response:**
+```json
+{
+  "status": "success",
+  "result": {
+    "messages": [
+      "Hello, agent!",
+      "Manager says hello",
+      "DevOps says hello",
+      "Senior Dev says hello"
+    ]
+  }
+}
+```
