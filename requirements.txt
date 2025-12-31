@@ -1,4 +1,6 @@
+streamlit
 fastapi
+uvicorn
 langgraph
 langchain-google-genai
-uvicorn
+requests
